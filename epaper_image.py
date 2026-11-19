@@ -77,8 +77,15 @@ def make_epaper_preview(artwork_bytes: bytes | None,
 
 
 def to_epd_bytes(source: Image.Image) -> bytes:
-    """Convert to 1-bit and pack row-major, MSB = leftmost pixel, bit 1 = white (SSD1681 RAM 0x24 format)."""
-    mono = to_epaper(source)
+    """Convert any image to 1-bit and pack it in the panel's RAM format (see pack_epd_bytes)."""
+    return pack_epd_bytes(to_epaper(source))
+
+
+def pack_epd_bytes(mono: Image.Image) -> bytes:
+    """Pack an already-converted 200x200 1-bit image row-major, MSB = leftmost pixel,
+    bit 1 = white (SSD1681 RAM 0x24 format, 5000 bytes)."""
+    if mono.mode != "1" or mono.size != SCREEN_SIZE:
+        raise ValueError(f"expected a {SCREEN_SIZE} 1-bit image, got {mono.size} {mono.mode}")
     width, height = mono.size
     assert width % 8 == 0
     px = mono.load()

@@ -3,8 +3,8 @@
 Reads the current Windows media session via GSMTC, extracts its album art,
 converts it to a 200x200 1-bit e-paper-style preview, and displays it.
 
-This prototype does NOT use Bluetooth yet. It verifies the Windows -> artwork
-part of the project before BLE hardware is introduced.
+Each new preview is also sent over Bluetooth LE to the display (epd_ble.py,
+firmware in epd_ble/). Run with --no-ble to only show the preview.
 
 Requires Windows 10 version 1809+ (or Windows 11), CPython 3.11+, and the
 packages listed in requirements.txt.
@@ -12,6 +12,7 @@ packages listed in requirements.txt.
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import queue
 import sys
@@ -25,7 +26,7 @@ from tkinter import ttk
 
 from PIL import Image, ImageTk
 
-from epaper_image import SCREEN_SIZE, make_epaper_preview
+from epaper_image import SCREEN_SIZE, make_epaper_preview, pack_epd_bytes
 
 
 # ----------------------------- Configuration ----------------------------- #
@@ -36,7 +37,7 @@ MAX_ARTWORK_BYTES = 12 * 1024 * 1024
 PREVIEW_SCALE = 2
 OUTPUT_PREVIEW = Path(__file__).with_name("latest_eink_preview.png")
 # Shown when nothing is playing or the player gives no artwork; converted to 1-bit automatically.
-FALLBACK_IMAGE = Path(__file__).with_name("releasemebruh.png")
+FALLBACK_IMAGE = Path(__file__).with_name("fallback.png")
 
 
 # ------------------------------- WinRT data ------------------------------- #
@@ -188,7 +189,7 @@ async def media_monitor(outbox: queue.Queue, stop_event: threading.Event) -> Non
 # ---------------------------------- GUI ------------------------------------ #
 
 class PreviewApp:
-    def __init__(self, root: tk.Tk) -> None:
+    def __init__(self, root: tk.Tk, use_ble: bool = True) -> None:
         self.root = root
         self.root.title("CH720N Display — Windows Media Preview")
         self.root.minsize(610, 390)
@@ -209,6 +210,12 @@ class PreviewApp:
         self.album_var = tk.StringVar(value="")
         self.source_var = tk.StringVar(value="")
         self.playback_var = tk.StringVar(value="")
+        self.ble_var = tk.StringVar(value="Bluetooth: off (--no-ble)")
+
+        self.link = None
+        if use_ble:
+            from epd_ble import EpdLink
+            self.link = EpdLink(on_status=lambda text: self.outbox.put({"kind": "ble", "message": text}))
 
         heading = ttk.Label(
             root,
@@ -248,16 +255,11 @@ class PreviewApp:
 
         ttk.Separator(info).pack(fill="x", pady=8)
         ttk.Label(info, textvariable=self.status_var, wraplength=320).pack(anchor="w")
-
-        footer = ttk.Label(
-            root,
-            text="Prototype only: reads Windows media metadata; Bluetooth transfer is not implemented yet.",
-            foreground="#666666",
-            wraplength=650,
-        )
-        footer.pack(anchor="w", pady=(12, 0))
+        ttk.Label(info, textvariable=self.ble_var, wraplength=320).pack(anchor="w", pady=(6, 0))
 
         self.root.protocol("WM_DELETE_WINDOW", self.close)
+        if self.link is not None:
+            self.link.start()
         self.worker.start()
         self.root.after(200, self._drain_queue)
 
@@ -296,11 +298,14 @@ class PreviewApp:
         artwork = payload.get("artwork")
         try:
             preview = make_epaper_preview(artwork, FALLBACK_IMAGE)
-            self._show_image(preview)
             preview.save(OUTPUT_PREVIEW)
         except Exception as exc:
             self.status_var.set(f"Could not decode artwork: {exc}")
-            self._show_image(make_epaper_preview(None, FALLBACK_IMAGE))
+            preview = make_epaper_preview(None, FALLBACK_IMAGE)
+        self._show_image(preview)
+        if self.link is not None:
+            # Same frame as the preview; the link skips it if the display already shows it.
+            self.link.submit(pack_epd_bytes(preview))
 
     def _drain_queue(self) -> None:
         try:
@@ -309,6 +314,8 @@ class PreviewApp:
                 kind = payload.get("kind")
                 if kind == "update":
                     self._handle_update(payload)
+                elif kind == "ble":
+                    self.ble_var.set(payload.get("message", ""))
                 elif kind in {"error", "fatal"}:
                     self.status_var.set(payload.get("message", "Unknown error"))
         except queue.Empty:
@@ -319,6 +326,8 @@ class PreviewApp:
 
     def close(self) -> None:
         self.stop_event.set()
+        if self.link is not None:
+            self.link.stop()
         self.root.destroy()
 
 
@@ -326,8 +335,12 @@ def main() -> None:
     if sys.platform != "win32":
         raise SystemExit("This prototype uses Windows GSMTC and must be run on Windows 10/11.")
 
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--no-ble", action="store_true", help="preview only; don't send to the display")
+    args = parser.parse_args()
+
     root = tk.Tk()
-    PreviewApp(root)
+    PreviewApp(root, use_ble=not args.no_ble)
     root.mainloop()
 
 

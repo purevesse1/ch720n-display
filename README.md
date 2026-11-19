@@ -2,7 +2,9 @@
 
 This first proof of concept checks whether Windows exposes the currently playing track and its artwork. It then renders a 200 × 200, 1-bit e-paper-style preview in a small window.
 
-**Bluetooth is not implemented yet.** This verifies the Windows media-session and image-conversion part before we add BLE.
+Each new preview is also sent over Bluetooth LE to the XIAO nRF52840 display. Flash `epd_ble/epd_ble.ino` to the board; it shows the fallback image on boot and advertises as `CH720N-EPD`. The script finds it, connects, and reconnects automatically. Use `--no-ble` for preview only.
+
+To test the link without the media script: `python epd_ble.py [image]` sends one picture (default `fallback.png`); `python epd_ble.py --scan` lists nearby BLE devices.
 
 ## Requirements
 
@@ -48,3 +50,4 @@ Windows can only provide metadata and artwork that the player/browser publishes.
 - Does not capture or inspect audio.
 - Does not change playback or send media-control commands.
 - Does not run in the background as a tray app yet.
+- The display needs no pairing; anything nearby can write to it (fine for a prototype).
