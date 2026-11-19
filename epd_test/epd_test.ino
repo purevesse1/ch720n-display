@@ -9,6 +9,7 @@
 
 #include <SPI.h>
 #include "fallback.h"
+#include <initializer_list>
 
 // Pins (see wiring.md). SCK = D8, MOSI = D10 are the hardware SPI defaults.
 const int PIN_BUSY = 0;   // D0  P0.02
