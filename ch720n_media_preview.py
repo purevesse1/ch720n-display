@@ -17,14 +17,15 @@ import queue
 import sys
 import threading
 import time
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 import tkinter as tk
 from tkinter import ttk
 
-from PIL import Image, ImageDraw, ImageOps, ImageTk
+from PIL import Image, ImageTk
+
+from epaper_image import SCREEN_SIZE, make_epaper_preview
 
 
 # ----------------------------- Configuration ----------------------------- #
@@ -32,9 +33,10 @@ from PIL import Image, ImageDraw, ImageOps, ImageTk
 POLL_INTERVAL_SECONDS = 1.5
 ARTWORK_RETRY_SECONDS = 8.0
 MAX_ARTWORK_BYTES = 12 * 1024 * 1024
-SCREEN_SIZE = (200, 200)
 PREVIEW_SCALE = 2
 OUTPUT_PREVIEW = Path(__file__).with_name("latest_eink_preview.png")
+# Shown when nothing is playing or the player gives no artwork; converted to 1-bit automatically.
+FALLBACK_IMAGE = Path(__file__).with_name("releasemebruh.png")
 
 
 # ------------------------------- WinRT data ------------------------------- #
@@ -183,44 +185,6 @@ async def media_monitor(outbox: queue.Queue, stop_event: threading.Event) -> Non
         stop_event.wait(POLL_INTERVAL_SECONDS)
 
 
-# ------------------------------- Image work ------------------------------- #
-
-def make_fallback_image() -> Image.Image:
-    """Create a simple, cute black-and-white placeholder graphic."""
-    image = Image.new("RGB", SCREEN_SIZE, "white")
-    draw = ImageDraw.Draw(image)
-
-    # A tiny ghost with a pixel-ish outline.
-    draw.ellipse((52, 30, 148, 143), fill="white", outline="black", width=5)
-    draw.rectangle((54, 90, 146, 145), fill="white")
-    draw.line((54, 126, 54, 151, 75, 137, 99, 151, 124, 137, 146, 151, 146, 126),
-              fill="black", width=5, joint="curve")
-    draw.ellipse((78, 76, 91, 94), fill="black")
-    draw.ellipse((109, 76, 122, 94), fill="black")
-    draw.arc((88, 91, 113, 115), start=10, end=170, fill="black", width=3)
-    draw.text((57, 169), "waiting for music...", fill="black")
-    return image
-
-
-def make_epaper_preview(artwork_bytes: bytes | None) -> Image.Image:
-    """Return a 200x200 monochrome/dithered image ready for an e-paper panel."""
-    if not artwork_bytes:
-        source = make_fallback_image()
-    else:
-        with Image.open(BytesIO(artwork_bytes)) as opened:
-            source = opened.convert("RGB")
-
-    square = ImageOps.fit(
-        source,
-        SCREEN_SIZE,
-        method=Image.Resampling.LANCZOS,
-        centering=(0.5, 0.5),
-    )
-    grayscale = ImageOps.grayscale(square)
-    # Floyd-Steinberg dithering approximates the look of a 1-bit e-paper panel.
-    return grayscale.convert("1", dither=Image.Dither.FLOYDSTEINBERG)
-
-
 # ---------------------------------- GUI ------------------------------------ #
 
 class PreviewApp:
@@ -264,7 +228,7 @@ class PreviewApp:
 
         self.image_label = ttk.Label(image_column)
         self.image_label.pack()
-        self._show_image(make_epaper_preview(None))
+        self._show_image(make_epaper_preview(None, FALLBACK_IMAGE))
 
         info = ttk.Frame(body)
         info.pack(side="left", fill="both", expand=True, anchor="n")
@@ -331,12 +295,12 @@ class PreviewApp:
 
         artwork = payload.get("artwork")
         try:
-            preview = make_epaper_preview(artwork)
+            preview = make_epaper_preview(artwork, FALLBACK_IMAGE)
             self._show_image(preview)
             preview.save(OUTPUT_PREVIEW)
         except Exception as exc:
             self.status_var.set(f"Could not decode artwork: {exc}")
-            self._show_image(make_epaper_preview(None))
+            self._show_image(make_epaper_preview(None, FALLBACK_IMAGE))
 
     def _drain_queue(self) -> None:
         try:
