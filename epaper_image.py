@@ -2,9 +2,14 @@
 
 Used as a module by ch720n_media_preview.py, or run on its own:
 
-    python epaper_image.py                          
-    python epaper_image.py input.jpg               # -> input_eink.png
+    python epaper_image.py                                   # fallback.png -> fallback_eink.png
+    python epaper_image.py input.jpg                         # -> input_eink.png
     python epaper_image.py input.jpg output.png
+    python epaper_image.py fallback.png epd_test/fallback.h  # C header for the epd_test sketch
+    python epaper_image.py input.png out.h --name my_img
+
+An output ending in .h gets the panel's raw bitmap (SSD1681 RAM format) as a C array instead of a PNG,
+so the panel shows exactly what the _eink.png preview shows.
 """
 
 from __future__ import annotations
@@ -71,16 +76,57 @@ def make_epaper_preview(artwork_bytes: bytes | None,
         return to_epaper(opened)
 
 
+def to_epd_bytes(source: Image.Image) -> bytes:
+    """Convert to 1-bit and pack row-major, MSB = leftmost pixel, bit 1 = white (SSD1681 RAM 0x24 format)."""
+    mono = to_epaper(source)
+    width, height = mono.size
+    assert width % 8 == 0
+    px = mono.load()
+    out = bytearray()
+    for y in range(height):
+        for xb in range(width // 8):
+            b = 0
+            for bit in range(8):
+                if px[xb * 8 + bit, y]:          # nonzero = white
+                    b |= 0x80 >> bit
+            out.append(b)
+    return bytes(out)
+
+
+def write_c_header(data: bytes, path: Path, name: str, source: Path) -> None:
+    """Write packed panel bytes as a `const uint8_t name[]` C header."""
+    w, h = SCREEN_SIZE
+    lines = [
+        f"// Generated from {source.name} by epaper_image.py — {w}x{h}, 1 = white. Do not edit by hand.",
+        "#pragma once",
+        "#include <stdint.h>",
+        "",
+        f"const uint8_t {name}[{len(data)}] = {{",
+    ]
+    for i in range(0, len(data), 16):
+        lines.append("  " + ", ".join(f"0x{b:02X}" for b in data[i:i + 16]) + ",")
+    lines.append("};")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Convert an image to a 200x200 1-bit e-paper image.")
     parser.add_argument("input", nargs="?", type=Path, default=FALLBACK_IMAGE,
                         help=f"image to convert (default: {FALLBACK_IMAGE.name})")
     parser.add_argument("output", nargs="?", type=Path,
-                        help="where to save the PNG (default: <input>_eink.png)")
+                        help="where to save the PNG, or a .h for a C header (default: <input>_eink.png)")
+    parser.add_argument("--name", default="fallback_img",
+                        help="C array name when writing a .h (default: fallback_img)")
     args = parser.parse_args()
 
     output = args.output or args.input.with_name(f"{args.input.stem}_eink.png")
     with Image.open(args.input) as opened:
+        if output.suffix.lower() == ".h":
+            data = to_epd_bytes(opened)
+            write_c_header(data, output, args.name, args.input)
+            black = sum(8 - bin(b).count("1") for b in data)
+            print(f"Wrote {output} ({len(data)} bytes, {black} black px)")
+            return
         result = to_epaper(opened)
     result.save(output)
     print(f"Saved {output} ({result.size[0]}x{result.size[1]}, 1-bit)")

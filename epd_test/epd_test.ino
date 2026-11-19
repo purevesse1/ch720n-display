@@ -3,7 +3,7 @@
 // Board: "Seeed nRF52 Boards" -> Seeed XIAO nRF52840 (non-mbed core)
 // HAT: BS = 0 (4-line SPI), Display Config = B (0.47R), VCC = 3.3 V
 //
-// fallback.h is generated from ../fallback.png: run `python png2epd.py` in the project root after changing it.
+// fallback.h is generated from ../fallback.png: run `python epaper_image.py fallback.png epd_test/fallback.h` in the project root after changing it.
 //
 // Sequence: white -> fallback image -> black/white checker -> fallback image -> sleep -> panel power off
 

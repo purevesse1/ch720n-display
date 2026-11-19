@@ -1,4 +1,4 @@
-// Generated from fallback.png by png2epd.py — 200x200, 1 = white. Do not edit by hand.
+// Generated from fallback.png by epaper_image.py — 200x200, 1 = white. Do not edit by hand.
 #pragma once
 #include <stdint.h>
 
